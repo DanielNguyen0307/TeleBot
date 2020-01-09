@@ -1,7 +1,10 @@
 import requests
 from bottle import Bottle, response, request as bottle_request
+import mysql.connector as conn
+import redis as rd
+import calendar, time
 
-
+@BotHandlerMixin
 class BotHandlerMixin:
     BOT_URL = 'https://api.telegram.org/bot901994224:AAEYMr2Tg0-Pj-Mtt6bBPBHqtfLxhTTWmc8/'
 
@@ -10,8 +13,11 @@ class BotHandlerMixin:
         Method to extract chat id from telegram request.
         """
         chat_id = data['message']['chat']['id']
-
         return chat_id
+
+    def get_time(self):
+        self.ts = calendar.timegm(time.gmtime())
+        return self.ts
 
     def get_name(self, data):
         """
@@ -25,7 +31,6 @@ class BotHandlerMixin:
         Method to extract message id from telegram request.
         """
         message_text = data['message']['text']
-
         return message_text
 
     def send_message(self, prepared_data):
@@ -42,8 +47,32 @@ class BotHandlerMixin:
                 stfile.write(self.message)
                 stfile.close()
         except:
-            pass
+            raise IOError
 
+    def storage_data(self,data):
+        mariadb_connection = conn.connect(host='telegramdatabases.cxivhdb9xo2i.ap-southeast-1.rds.amazonaws.com', \
+                                          user='telegram', password='telegram1234', database='mydb')
+        cursor = mariadb_connection.cursor()
+        cmd = 'INSERT INTO chat_content VALUES (' + "\'"+ str(self.get_name(data)) + "\'" + ', ' + "\'" + \
+              str(self.get_message(data)) + "\'" + ', ' + str(self.get_time()) +  ');'
+        try:
+            cursor.execute(cmd)
+            cursor.execute('commit;')
+            print(cmd)
+        except:
+            print('Error related to DataBase Conection!!!')
+            print(cmd)
+
+    def storage_redis(self,data):
+        conn = rd.Redis(host='54.179.160.94', port='6379', db=0)
+        key = self.get_name(data)
+        value = self.get_message(data)
+        try:
+            conn.set(key, value)
+        except:
+            print('Error to connect to Redis Server')
+
+@TelegramBot
 class TelegramBot(BotHandlerMixin, Bottle):
     BOT_URL = 'https://api.telegram.org/bot901994224:AAEYMr2Tg0-Pj-Mtt6bBPBHqtfLxhTTWmc8/'
 
@@ -71,13 +100,14 @@ class TelegramBot(BotHandlerMixin, Bottle):
             "chat_id": chat_id,
             "text": answer,
         }
-
         return json_data
 
     def post_handler(self):
         data = bottle_request.json
         answer_data = self.prepare_data_for_answer(data)
         self.storage_message(data)
+        # self.storage_data(data)
+        # self.storage_redis(data)
         self.send_message(answer_data)
         return response
 
